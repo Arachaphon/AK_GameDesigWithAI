@@ -337,6 +337,12 @@ export default function App() {
   // Interactive Gamepad lighting indicator
   const [keyboardState, setKeyboardState] = useState<{ [key: string]: boolean }>({});
 
+  // New Upgrade powerups and Safe Zone states
+  const [equippedSword, setEquippedSword] = useState<boolean>(false);
+  const [equippedArmor, setEquippedArmor] = useState<boolean>(false);
+  const [equippedBoots, setEquippedBoots] = useState<boolean>(false);
+  const [inSafeZone, setInSafeZone] = useState<boolean>(false);
+
   // Canvas ref & loop control
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameId = useRef<number | null>(null);
@@ -381,6 +387,20 @@ export default function App() {
       size: 2.2,
       duration: 0
     },
+    // Dropped items
+    drops: [] as Array<{
+      id: string;
+      type: 'sword' | 'armor' | 'boots';
+      x: number;
+      z: number;
+      mesh: THREE.Mesh;
+      light: THREE.PointLight;
+      bobTime: number;
+    }>,
+    equippedSword: false,
+    equippedArmor: false,
+    equippedBoots: false,
+    inSafeZone: false,
     // Potions spawned on map
     potions: [] as Array<{
       mesh: THREE.Sprite;
@@ -510,14 +530,31 @@ export default function App() {
     setActiveActionLog(prev => [msg, ...prev.slice(0, 4)]);
   };
 
-  // Setup Keyboard binding detectors
+  // Setup Keyboard and Mouse binding detectors
   useEffect(() => {
     // Auto-focus window on click or pointer down to ensure iframe has focus to capture keystrokes
-    const handleWindowFocusClick = () => {
+    // Support left-click to punch and right-click to trigger ultimate
+    const handleWindowFocusClick = (e: MouseEvent) => {
       window.focus();
+      if (gameRunning.current) {
+        if (e.button === 0) {
+          triggerPunch();
+        } else if (e.button === 2) {
+          e.preventDefault();
+          triggerUltimate();
+        }
+      }
     };
+
+    const handleContextMenu = (e: MouseEvent) => {
+      if (gameRunning.current) {
+        e.preventDefault();
+      }
+    };
+
     window.addEventListener('mousedown', handleWindowFocusClick);
     window.addEventListener('click', handleWindowFocusClick);
+    window.addEventListener('contextmenu', handleContextMenu);
 
     // Initial focus attempt
     window.focus();
@@ -604,6 +641,7 @@ export default function App() {
     return () => {
       window.removeEventListener('mousedown', handleWindowFocusClick);
       window.removeEventListener('click', handleWindowFocusClick);
+      window.removeEventListener('contextmenu', handleContextMenu);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
@@ -612,7 +650,8 @@ export default function App() {
   // --- ACTIONS ---
 
   const triggerPunch = () => {
-    const p = stateRef.current.player;
+    const state = stateRef.current;
+    const p = state.player;
     if (p.isAttacking) return; // Prevent spamming mid-punch frame
 
     p.isAttacking = true;
@@ -620,14 +659,21 @@ export default function App() {
     p.row = 2; // Row 3 = Attack index 2
     p.frame = 0;
     p.frameTime = 0;
-    p.attackLock = 16; // Animation locks for 16 frame ticks (plays fast!)
     
-    // Position Hit box 1.5 units in front of player
-    const offsetDirection = p.facingRight ? 1.4 : -1.4;
-    stateRef.current.hitBox.active = true;
-    stateRef.current.hitBox.x = p.x + offsetDirection;
-    stateRef.current.hitBox.z = p.z;
-    stateRef.current.hitBox.duration = 14;
+    // Sword equipped bonus: attack animation is even faster (locks only 10 frames)
+    const attackLockDuration = state.equippedSword ? 10 : 16;
+    p.attackLock = attackLockDuration;
+    
+    // Position Hit box further in front if sword is equipped
+    const baseOffset = state.equippedSword ? 2.2 : 1.4;
+    const offsetDirection = p.facingRight ? baseOffset : -baseOffset;
+    state.hitBox.active = true;
+    state.hitBox.x = p.x + offsetDirection;
+    state.hitBox.z = p.z;
+    
+    // Sword equipped bonus: hitbox size is 3.6 instead of 2.2!
+    state.hitBox.size = state.equippedSword ? 3.6 : 2.2;
+    state.hitBox.duration = 14;
 
     sfx.playPunch();
   };
@@ -683,6 +729,11 @@ export default function App() {
     stateRef.current.warpPortal.active = false;
     stateRef.current.warpPortal.mesh = null;
     stateRef.current.warpPortal.light = null;
+    stateRef.current.drops = [];
+    stateRef.current.equippedSword = false;
+    stateRef.current.equippedArmor = false;
+    stateRef.current.equippedBoots = false;
+    stateRef.current.inSafeZone = false;
     
     setPlayerHp(5);
     setScore(0);
@@ -690,6 +741,10 @@ export default function App() {
     setDefeatedCount(0);
     setBossActive(false);
     setBossHp(15);
+    setEquippedSword(false);
+    setEquippedArmor(false);
+    setEquippedBoots(false);
+    setInSafeZone(false);
     setIsGameOver(false);
     setIsEnding(false);
     setEndingStep('dialogue');
@@ -830,6 +885,30 @@ export default function App() {
     mapEdge.rotation.x = -Math.PI / 2;
     mapEdge.position.y = 0.02;
     scene.add(mapEdge);
+
+    // Add visual Cyber Safe Zone at the center
+    const safeZoneRingGeo = new THREE.RingGeometry(4.3, 4.5, 32);
+    const safeZoneRingMat = new THREE.MeshBasicMaterial({ color: '#10b981', side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+    const safeZoneRing = new THREE.Mesh(safeZoneRingGeo, safeZoneRingMat);
+    safeZoneRing.rotation.x = -Math.PI / 2;
+    safeZoneRing.position.y = 0.03;
+    scene.add(safeZoneRing);
+
+    const shieldGeo = new THREE.CylinderGeometry(4.5, 4.5, 3.2, 32, 1, true);
+    const shieldMat = new THREE.MeshBasicMaterial({
+      color: '#10b981',
+      transparent: true,
+      opacity: 0.15,
+      side: THREE.DoubleSide
+    });
+    const shieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
+    shieldMesh.position.set(0, 1.6, 0);
+    scene.add(shieldMesh);
+
+    // Safe zone ambient green light
+    const safeZoneLight = new THREE.PointLight('#10b981', 8, 10);
+    safeZoneLight.position.set(0, 1.8, 0);
+    scene.add(safeZoneLight);
 
     // 2. 2D Sprite Character Facing Camera
     const spriteTex = textureLoader.load('https://raw.githubusercontent.com/banyapon/banyapon.github.io/refs/heads/main/studio/images/player.png', (tex) => {
@@ -1045,6 +1124,64 @@ export default function App() {
       sfx.playShockwave();
     };
 
+    const spawnItemDrop = (dx: number, dz: number) => {
+      const state = stateRef.current;
+      const neededTypes: Array<'sword' | 'armor' | 'boots'> = [];
+      if (!state.equippedSword) neededTypes.push('sword');
+      if (!state.equippedArmor) neededTypes.push('armor');
+      if (!state.equippedBoots) neededTypes.push('boots');
+      
+      // Fallback if they have everything, drop Armor (which can heal them)
+      const type = neededTypes.length > 0 
+        ? neededTypes[Math.floor(Math.random() * neededTypes.length)]
+        : 'armor';
+        
+      let color = '#06b6d4'; // cyan for sword
+      let geo: THREE.BufferGeometry;
+      
+      if (type === 'sword') {
+        color = '#06b6d4'; // bright cyan
+        geo = new THREE.ConeGeometry(0.35, 1.2, 5);
+      } else if (type === 'armor') {
+        color = '#f59e0b'; // golden armor shield
+        geo = new THREE.TorusGeometry(0.38, 0.14, 8, 16);
+      } else {
+        color = '#10b981'; // emerald boots speed
+        geo = new THREE.OctahedronGeometry(0.45);
+      }
+      
+      const mat = new THREE.MeshStandardMaterial({
+        color: color,
+        emissive: color,
+        emissiveIntensity: 1.5,
+        roughness: 0.2,
+        metalness: 0.9,
+        transparent: true,
+        opacity: 0.95
+      });
+      
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(dx, 0.9, dz);
+      mesh.castShadow = true;
+      scene.add(mesh);
+      
+      const pLight = new THREE.PointLight(color, 4.0, 6.0);
+      pLight.position.set(dx, 0.6, dz);
+      scene.add(pLight);
+      
+      stateRef.current.drops.push({
+        id: 'drop_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        type: type,
+        x: dx,
+        z: dz,
+        mesh: mesh,
+        light: pLight,
+        bobTime: Math.random() * 10
+      });
+
+      addActionLog(`🎁 A CYBER ${type.toUpperCase()} ENHANCEMENT DROPPED!`);
+    };
+
     const spawnWarpPortal = (px: number, pz: number) => {
       if (stateRef.current.warpPortal.active) return;
 
@@ -1072,8 +1209,8 @@ export default function App() {
       sfx.playDance();
     };
 
-    // Spawn 5 initial enemies inside
-    for (let i = 0; i < 5; i++) {
+    // Spawn 3 initial enemies inside (fewer NPCs)
+    for (let i = 0; i < 3; i++) {
       spawnEnemy((Math.random() - 0.5) * 35, (Math.random() - 0.5) * 35);
     }
 
@@ -1124,8 +1261,8 @@ export default function App() {
       // Set moving status
       const isMovingNow = (dx !== 0 || dz !== 0);
 
-      // Dynamic friction & velocity adjustments
-      const speedMultiplier = 6.8;
+      // Dynamic friction & velocity adjustments based on Quantum Boots
+      const speedMultiplier = state.equippedBoots ? 9.5 : 6.8;
       p.vx = dx * speedMultiplier;
       p.vz = dz * speedMultiplier;
 
@@ -1139,6 +1276,24 @@ export default function App() {
       if (p.x > boundLimit) p.x = boundLimit;
       if (p.z < -boundLimit) p.z = -boundLimit;
       if (p.z > boundLimit) p.z = boundLimit;
+
+      // Update Safe Zone status
+      const isPlayerInSafeZone = (p.x * p.x + p.z * p.z) < 4.5 * 4.5;
+      if (state.inSafeZone !== isPlayerInSafeZone) {
+        state.inSafeZone = isPlayerInSafeZone;
+        setInSafeZone(isPlayerInSafeZone);
+        if (isPlayerInSafeZone) {
+          addActionLog("🛡️ ENTERED CYBER SAFE ZONE. SHIELD ACTIVE.");
+        } else {
+          addActionLog("⚠️ LEFT SAFE ZONE. SHIELD DEACTIVATED.");
+        }
+      }
+
+      // Pulsate the Safe Zone Shield rotating animation
+      if (shieldMesh) {
+        shieldMesh.rotation.y += delta * 0.45;
+        shieldMesh.material.opacity = 0.12 + Math.sin(Date.now() * 0.0035) * 0.06;
+      }
 
       // Sync Sprite Horizontal face direction based on move
       if (dx > 0) p.facingRight = true;
@@ -1197,17 +1352,18 @@ export default function App() {
         p.frameTime = 0;
       }
 
-      // Update texture coordinates
-      spriteTex.offset.x = p.frame * 0.25;
+      // Update texture coordinates with robust horizontal flipping
+      if (p.facingRight) {
+        spriteTex.repeat.x = 0.25;
+        spriteTex.offset.x = p.frame * 0.25;
+      } else {
+        spriteTex.repeat.x = -0.25;
+        spriteTex.offset.x = (p.frame + 1) * 0.25;
+      }
       spriteTex.offset.y = 0.75 - (p.row * 0.25);
 
-      // Horizontal orientation flipping
-      // Using custom repeat.x flipping or sprite scale inversion
-      if (p.facingRight) {
-        playerSprite.scale.x = 2.4;
-      } else {
-        playerSprite.scale.x = -2.4;
-      }
+      // Keep scale.x positive to avoid billboarding bugs
+      playerSprite.scale.x = 2.4;
 
       // Sync character coordinates into 3D world
       playerSprite.position.set(p.x, 1.2, p.z);
@@ -1242,9 +1398,17 @@ export default function App() {
         }
         
         // Match visual indicator position
-        const punchOffset = p.facingRight ? 1.5 : -1.5;
+        const punchOffset = p.facingRight ? (state.equippedSword ? 2.2 : 1.5) : (state.equippedSword ? -2.2 : -1.5);
         punchIndicator.position.set(p.x + punchOffset, 0.7, p.z);
         punchIndicatorMat.opacity = Math.max(0, h.duration / 14) * 0.7;
+        
+        if (state.equippedSword) {
+          punchIndicator.scale.set(1.8, 1.0, 1.8);
+          punchIndicatorMat.color.set('#06b6d4'); // cyber neon cyan
+        } else {
+          punchIndicator.scale.set(1.0, 1.0, 1.0);
+          punchIndicatorMat.color.set('#e11d48'); // rose red
+        }
       } else {
         punchIndicatorMat.opacity = 0;
       }
@@ -1469,15 +1633,18 @@ export default function App() {
       if (!state.boss.active && !state.boss.isDefeated) {
         state.enemySpawnTimer -= delta;
         if (state.enemySpawnTimer <= 0) {
-          // Reset timer randomly to 1-3 seconds
-          state.enemySpawnTimer = 1.0 + Math.random() * 2.0;
+          // Reset timer randomly to 3.0 to 7.0 seconds (fewer NPCs)
+          state.enemySpawnTimer = 3.0 + Math.random() * 4.0;
 
-          // Spawn from a random outer boundary edge (from all directions!)
-          const angle = Math.random() * Math.PI * 2;
-          const spawnDist = 23.5;
-          const spawnX = Math.cos(angle) * spawnDist;
-          const spawnZ = Math.sin(angle) * spawnDist;
-          spawnEnemy(spawnX, spawnZ);
+          // Limit maximum concurrent active enemies on the map to 5
+          if (state.enemies.length < 5) {
+            // Spawn from a random outer boundary edge (from all directions!)
+            const angle = Math.random() * Math.PI * 2;
+            const spawnDist = 23.5;
+            const spawnX = Math.cos(angle) * spawnDist;
+            const spawnZ = Math.sin(angle) * spawnDist;
+            spawnEnemy(spawnX, spawnZ);
+          }
         }
       }
 
@@ -1543,10 +1710,21 @@ export default function App() {
         if (enemy.z < -bLimit) enemy.z = -bLimit;
         if (enemy.z > bLimit) enemy.z = bLimit;
 
+        // Active Repel normal enemies from Cyber Safe Zone (radius 4.5)
+        const distFromCenter = Math.sqrt(enemy.x * enemy.x + enemy.z * enemy.z);
+        if (distFromCenter < 4.5 && enemy.knockbackTimer <= 0) {
+          const angle = Math.atan2(enemy.z, enemy.x);
+          enemy.x = Math.cos(angle) * 4.6;
+          enemy.z = Math.sin(angle) * 4.6;
+          enemy.vx = Math.cos(angle) * 8.0;
+          enemy.vz = Math.sin(angle) * 8.0;
+          enemy.knockbackTimer = 0.25;
+        }
+
         // Position mesh in the 3D world
         enemy.mesh.position.set(enemy.x, 1.1, enemy.z);
 
-        // Facing direction
+        // Facing direction with robust turning mapping
         if (enemy.vx > 0.1) {
           enemy.facingRight = true;
         } else if (enemy.vx < -0.1) {
@@ -1556,10 +1734,13 @@ export default function App() {
         }
 
         if (enemy.facingRight) {
-          enemy.mesh.scale.x = 2.2;
+          enemy.texture.repeat.x = 0.25;
+          enemy.texture.offset.x = enemy.frame * 0.25;
         } else {
-          enemy.mesh.scale.x = -2.2;
+          enemy.texture.repeat.x = -0.25;
+          enemy.texture.offset.x = (enemy.frame + 1) * 0.25;
         }
+        enemy.mesh.scale.x = 2.2;
 
         // Walk Animation cycle
         enemy.frameTime += delta * 45;
@@ -1568,7 +1749,6 @@ export default function App() {
           enemy.frameTime = 0;
         }
         
-        enemy.texture.offset.x = enemy.frame * 0.25;
         enemy.texture.offset.y = 0.5 - (enemy.row * 0.5);
 
         // Flash Red visualizer decrement
@@ -1584,7 +1764,7 @@ export default function App() {
           enemy.attackCooldown -= delta;
         }
 
-        if (dist < 1.15 && p.invulnTimer <= 0 && enemy.attackCooldown <= 0) {
+        if (dist < 1.15 && p.invulnTimer <= 0 && enemy.attackCooldown <= 0 && !state.inSafeZone) {
           p.hp -= 1;
           setPlayerHp(p.hp);
           p.invulnTimer = 1.5; // 1.5s invulnerability flash
@@ -1651,6 +1831,11 @@ export default function App() {
               sfx.playShatter();
               addActionLog(`☠️ CYBER ENEMY OBLITERATED! (${state.defeatedCount}/10 kills to anomaly)`);
               generateShatterParticles(enemy.x, 1.1, enemy.z, '#ef4444');
+              
+              // 40% probability of dropping a cool Quantum upgrade item
+              if (Math.random() < 0.40) {
+                spawnItemDrop(enemy.x, enemy.z);
+              }
             }
 
             if (state.score > highScore) {
@@ -1703,6 +1888,11 @@ export default function App() {
               sfx.playShatter();
               addActionLog(`🔥 NOVA WAVE VAPORIZED ENEMY! (${state.defeatedCount}/10 kills)`);
               generateShatterParticles(enemy.x, 1.1, enemy.z, '#a855f7');
+              
+              // 40% probability of dropping a cool Quantum upgrade item
+              if (Math.random() < 0.40) {
+                spawnItemDrop(enemy.x, enemy.z);
+              }
             }
 
             if (state.score > highScore) {
@@ -1856,7 +2046,7 @@ export default function App() {
           }
 
           const distToBoss = Math.sqrt((p.x - boss.x) * (p.x - boss.x) + (p.z - boss.z) * (p.z - boss.z));
-          if (distToBoss < 2.0 && p.invulnTimer <= 0) {
+          if (distToBoss < 2.0 && p.invulnTimer <= 0 && !state.inSafeZone) {
             p.hp -= 1;
             setPlayerHp(p.hp);
             p.invulnTimer = 1.5;
@@ -1943,7 +2133,7 @@ export default function App() {
           generateShatterParticles(fb.x, 0.7, fb.z, '#f97316');
 
           const distToImpact = Math.sqrt((p.x - fb.x) * (p.x - fb.x) + (p.z - fb.z) * (p.z - fb.z));
-          if (distToImpact < 1.8 && p.invulnTimer <= 0) {
+          if (distToImpact < 1.8 && p.invulnTimer <= 0 && !state.inSafeZone) {
             p.hp -= 1;
             setPlayerHp(p.hp);
             p.invulnTimer = 1.5;
@@ -1984,6 +2174,62 @@ export default function App() {
           bgm.stop();
           sfx.playDance();
           addActionLog("🌌 SIMULATION PURGED! ENDING PROTOCOL INITIATED.");
+        }
+      }
+
+      // --- 6H. UPDATE AND COLLIDE WITH ITEM DROPS ---
+      for (let i = state.drops.length - 1; i >= 0; i--) {
+        const drop = state.drops[i];
+        
+        // Bobbing and spinning animation
+        drop.bobTime += delta * 3.5;
+        drop.mesh.position.y = 0.8 + Math.sin(drop.bobTime) * 0.16;
+        drop.mesh.rotation.y += delta * 2.2;
+        drop.mesh.rotation.x += delta * 0.6;
+        
+        // Pulse light intensity
+        drop.light.intensity = 3.0 + Math.sin(drop.bobTime) * 1.5;
+        
+        // Distance check with player
+        const d_x = p.x - drop.x;
+        const d_z = p.z - drop.z;
+        const distToPlayer = Math.sqrt(d_x * d_x + d_z * d_z);
+        
+        if (distToPlayer < 1.4) {
+          // Play collection sound & feedback
+          sfx.playDance(); // nice rewarding sound
+          
+          if (drop.type === 'sword') {
+            state.equippedSword = true;
+            setEquippedSword(true);
+            addActionLog("🗡️ CYBER SWORD EQUIPPED: PUNCH SPEED & HITBOX BOOSTED!");
+          } else if (drop.type === 'armor') {
+            state.equippedArmor = true;
+            setEquippedArmor(true);
+            p.hp = Math.min(5, p.hp + 2); // Heal +2 HP
+            setPlayerHp(p.hp);
+            addActionLog("🛡️ CYBER ARMOR EQUIPPED: CHIP DAMAGE ABSORPTION & +2 HP HEAL!");
+          } else if (drop.type === 'boots') {
+            state.equippedBoots = true;
+            setEquippedBoots(true);
+            addActionLog("🥾 QUANTUM BOOTS EQUIPPED: MOVEMENT SPEED PERMANENTLY BOOSTED!");
+          }
+          
+          // Generate neon collection particles
+          const colorHex = drop.type === 'sword' ? '#06b6d4' : (drop.type === 'armor' ? '#f59e0b' : '#10b981');
+          generateShatterParticles(drop.x, 0.9, drop.z, colorHex);
+          
+          // Remove from scene
+          scene.remove(drop.mesh);
+          scene.remove(drop.light);
+          if (drop.mesh.geometry) drop.mesh.geometry.dispose();
+          if (Array.isArray(drop.mesh.material)) {
+            drop.mesh.material.forEach(m => m.dispose());
+          } else if (drop.mesh.material) {
+            drop.mesh.material.dispose();
+          }
+          
+          state.drops.splice(i, 1);
         }
       }
 
@@ -2255,9 +2501,32 @@ export default function App() {
               </div>
 
               {/* High score display */}
-              <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+              <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono border-b border-purple-950/50 pb-2.5">
                 <span>Personal Best:</span>
                 <span className="text-amber-400 font-bold">{highScore.toLocaleString()}</span>
+              </div>
+
+              {/* Powerups & Safe Zone UI Inventory */}
+              <div className="space-y-2">
+                {inSafeZone && (
+                  <div className="bg-emerald-950/40 text-emerald-400 border border-emerald-500/35 px-2 py-0.5 rounded-lg text-[9px] font-bold font-mono animate-pulse flex items-center justify-center gap-1">
+                    🛡️ SAFE ZONE ACTIVE (IMMUNE)
+                  </div>
+                )}
+                <div className="flex flex-col gap-1.5">
+                  <div className="text-[9px] font-mono text-slate-500 uppercase text-left">CYBER EQUIPMENT</div>
+                  <div className="flex gap-2">
+                    <div className={`flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[9px] font-mono font-bold border transition-colors ${equippedSword ? 'bg-cyan-950/30 border-cyan-500/45 text-cyan-400 font-black shadow-[0_0_4px_rgba(6,182,212,0.15)] animate-pulse' : 'bg-slate-950/30 border-slate-900 text-slate-600'}`}>
+                      <span>🗡️ SWORD</span>
+                    </div>
+                    <div className={`flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[9px] font-mono font-bold border transition-colors ${equippedArmor ? 'bg-amber-950/30 border-amber-500/45 text-amber-400 font-black shadow-[0_0_4px_rgba(245,158,11,0.15)] animate-pulse' : 'bg-slate-950/30 border-slate-900 text-slate-600'}`}>
+                      <span>🛡️ ARMOR</span>
+                    </div>
+                    <div className={`flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[9px] font-mono font-bold border transition-colors ${equippedBoots ? 'bg-emerald-950/30 border-emerald-500/45 text-emerald-400 font-black shadow-[0_0_4px_rgba(16,185,129,0.15)] animate-pulse' : 'bg-slate-950/30 border-slate-900 text-slate-600'}`}>
+                      <span>🥾 BOOTS</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
