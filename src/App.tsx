@@ -512,27 +512,55 @@ export default function App() {
 
   // Setup Keyboard binding detectors
   useEffect(() => {
+    // Auto-focus window on click or pointer down to ensure iframe has focus to capture keystrokes
+    const handleWindowFocusClick = () => {
+      window.focus();
+    };
+    window.addEventListener('mousedown', handleWindowFocusClick);
+    window.addEventListener('click', handleWindowFocusClick);
+
+    // Initial focus attempt
+    window.focus();
+
     const handleKeyDown = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
       const code = e.code;
       
+      const isUp = k === 'w' || k === 'ไ' || code === 'KeyW' || code === 'ArrowUp' || e.key === 'ArrowUp';
+      const isLeft = k === 'a' || k === 'ฟ' || code === 'KeyA' || code === 'ArrowLeft' || e.key === 'ArrowLeft';
+      const isDown = k === 's' || k === 'ห' || code === 'KeyS' || code === 'ArrowDown' || e.key === 'ArrowDown';
+      const isRight = k === 'd' || k === 'ก' || code === 'KeyD' || code === 'ArrowRight' || e.key === 'ArrowRight';
+      const isPunch = k === 'p' || k === 'ย' || code === 'KeyP';
+      const isUltimate = k === 'o' || k === 'น' || code === 'KeyO';
+
       // Sync gamepad highlighted UI keys
-      setKeyboardState(prev => ({ ...prev, [k]: true, [code]: true }));
+      setKeyboardState(prev => {
+        const next = { ...prev };
+        next[k] = true;
+        next[code] = true;
+        if (isUp) { next['w'] = true; next['ArrowUp'] = true; }
+        if (isLeft) { next['a'] = true; next['ArrowLeft'] = true; }
+        if (isDown) { next['s'] = true; next['ArrowDown'] = true; }
+        if (isRight) { next['d'] = true; next['ArrowRight'] = true; }
+        if (isPunch) next['p'] = true;
+        if (isUltimate) next['o'] = true;
+        return next;
+      });
 
       const keys = stateRef.current.keys;
-      if (k === 'w' || e.key === 'ArrowUp') { keys.w = true; keys.ArrowUp = true; }
-      if (k === 'a' || e.key === 'ArrowLeft') { keys.a = true; keys.ArrowLeft = true; }
-      if (k === 's' || e.key === 'ArrowDown') { keys.s = true; keys.ArrowDown = true; }
-      if (k === 'd' || e.key === 'ArrowRight') { keys.d = true; keys.ArrowRight = true; }
+      if (isUp) { keys.w = true; keys.ArrowUp = true; }
+      if (isLeft) { keys.a = true; keys.ArrowLeft = true; }
+      if (isDown) { keys.s = true; keys.ArrowDown = true; }
+      if (isRight) { keys.d = true; keys.ArrowRight = true; }
       
       // P = Attack
-      if (k === 'p') {
+      if (isPunch) {
         keys.p = true;
         triggerPunch();
       }
 
       // O = Burst ultimate
-      if (k === 'o') {
+      if (isUltimate) {
         keys.o = true;
         triggerUltimate();
       }
@@ -542,20 +570,40 @@ export default function App() {
       const k = e.key.toLowerCase();
       const code = e.code;
 
-      setKeyboardState(prev => ({ ...prev, [k]: false, [code]: false }));
+      const isUp = k === 'w' || k === 'ไ' || code === 'KeyW' || code === 'ArrowUp' || e.key === 'ArrowUp';
+      const isLeft = k === 'a' || k === 'ฟ' || code === 'KeyA' || code === 'ArrowLeft' || e.key === 'ArrowLeft';
+      const isDown = k === 's' || k === 'ห' || code === 'KeyS' || code === 'ArrowDown' || e.key === 'ArrowDown';
+      const isRight = k === 'd' || k === 'ก' || code === 'KeyD' || code === 'ArrowRight' || e.key === 'ArrowRight';
+      const isPunch = k === 'p' || k === 'ย' || code === 'KeyP';
+      const isUltimate = k === 'o' || k === 'น' || code === 'KeyO';
+
+      setKeyboardState(prev => {
+        const next = { ...prev };
+        next[k] = false;
+        next[code] = false;
+        if (isUp) { next['w'] = false; next['ArrowUp'] = false; }
+        if (isLeft) { next['a'] = false; next['ArrowLeft'] = false; }
+        if (isDown) { next['s'] = false; next['ArrowDown'] = false; }
+        if (isRight) { next['d'] = false; next['ArrowRight'] = false; }
+        if (isPunch) next['p'] = false;
+        if (isUltimate) next['o'] = false;
+        return next;
+      });
 
       const keys = stateRef.current.keys;
-      if (k === 'w' || e.key === 'ArrowUp') { keys.w = false; keys.ArrowUp = false; }
-      if (k === 'a' || e.key === 'ArrowLeft') { keys.a = false; keys.ArrowLeft = false; }
-      if (k === 's' || e.key === 'ArrowDown') { keys.s = false; keys.ArrowDown = false; }
-      if (k === 'd' || e.key === 'ArrowRight') { keys.d = false; keys.ArrowRight = false; }
-      if (k === 'p') keys.p = false;
-      if (k === 'o') keys.o = false;
+      if (isUp) { keys.w = false; keys.ArrowUp = false; }
+      if (isLeft) { keys.a = false; keys.ArrowLeft = false; }
+      if (isDown) { keys.s = false; keys.ArrowDown = false; }
+      if (isRight) { keys.d = false; keys.ArrowRight = false; }
+      if (isPunch) keys.p = false;
+      if (isUltimate) keys.o = false;
     };
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => {
+      window.removeEventListener('mousedown', handleWindowFocusClick);
+      window.removeEventListener('click', handleWindowFocusClick);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
