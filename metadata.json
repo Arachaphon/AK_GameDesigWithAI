@@ -1,0 +1,6 @@
+{
+  "name": "Custom Controls Adventure",
+  "description": "A retro arcade action game with a full-screen launcher, customized keybindings, and dynamic canvas gameplay.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

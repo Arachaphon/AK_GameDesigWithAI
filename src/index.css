@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@theme {
+  --animate-nebula-slow: nebula-slow 25s ease-in-out infinite alternate;
+  --animate-nebula-medium: nebula-medium 30s ease-in-out infinite alternate;
+  --animate-nebula-fast: nebula-fast 20s ease-in-out infinite alternate;
+
+  @keyframes nebula-slow {
+    0% { transform: translate(0px, 0px) scale(1); }
+    50% { transform: translate(80px, -50px) scale(1.15); }
+    100% { transform: translate(-40px, 40px) scale(0.9); }
+  }
+  @keyframes nebula-medium {
+    0% { transform: translate(0px, 0px) scale(1); }
+    50% { transform: translate(-60px, 60px) scale(1.25); }
+    100% { transform: translate(50px, -30px) scale(0.95); }
+  }
+  @keyframes nebula-fast {
+    0% { transform: translate(0px, 0px) scale(0.9); }
+    50% { transform: translate(40px, 80px) scale(1.1); }
+    100% { transform: translate(-70px, -50px) scale(1.0); }
+  }
+}
+
